@@ -44,6 +44,13 @@ class Config:
                 self.debug = config.get("debug", False)
                 self.connectorDrops = config.get("connectorDropsUrl", "")
                 self.showHistoricalDrops = config.get("showHistoricalDrops", True)
+                self.email = {
+                    "smtpServer": config.get("smtpServer", ""),
+                    "smtpPort": config.get("smtpPort", 587),
+                    "smtpUser": config.get("smtpUser", ""),
+                    "smtpPassword": config.get("smtpPassword", ""),
+                    "notifyEmail": config.get("notifyEmail", ""),
+                }
         except FileNotFoundError as ex:
             print(f"[red]CRITICAL ERROR: The configuration file cannot be found at {configPath}\nHave you extacted the ZIP archive and edited the configuration file?")
             print("Press any key to exit...")

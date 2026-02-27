@@ -7,6 +7,7 @@ from Exceptions.InvalidIMAPCredentialsException import InvalidIMAPCredentialsExc
 from Exceptions.Fail2FAException import Fail2FAException
 import requests
 
+from Notifier import Notifier
 from SharedData import SharedData
 
 class FarmThread(Thread):
@@ -14,7 +15,7 @@ class FarmThread(Thread):
     A thread that creates a capsule farm for a given account
     """
 
-    def __init__(self, log, config, account, stats, locks, sharedData: SharedData):
+    def __init__(self, log, config, account, stats, locks, sharedData: SharedData, notifier: Notifier = None):
         """
         Initializes the FarmThread
 
@@ -22,6 +23,7 @@ class FarmThread(Thread):
         :param config: Config object
         :param account: str, account name
         :param stats: Stats, Stats object
+        :param notifier: Notifier object for email alerts
         """
         super().__init__()
         self.log = log
@@ -31,6 +33,7 @@ class FarmThread(Thread):
         self.browser = Browser(self.log, self.stats, self.config, self.account, sharedData)
         self.locks = locks
         self.sharedData = sharedData
+        self.notifier = notifier
 
     def run(self):
         """
@@ -83,16 +86,35 @@ class FarmThread(Thread):
             else:
                 self.log.error(f"Login for {self.account} FAILED!")
                 self.stats.addLoginFailed(self.account)
-                if self.stats.getFailedLogins(self.account) < 3:
+                failed = self.stats.getFailedLogins(self.account)
+                if failed < 3:
                     self.stats.updateStatus(self.account, "[red]LOGIN FAILED - WILL RETRY SOON")
                 else:
                     self.stats.updateStatus(self.account, "[red]LOGIN FAILED")
+                if self.notifier and failed >= 3:
+                    self.notifier.notify(
+                        f"Login failed for {self.account} ({failed} attempts)",
+                        f"Account {self.account} has failed to log in {failed} times in a row.\n\n"
+                        f"Session cookies are likely expired. Please refresh them:\n"
+                        f"  /CapsuleFarmer refresh cookies",
+                        event_key=f"login_failed_{self.account}")
         except InvalidIMAPCredentialsException:
             self.log.error(f"IMAP login failed for {self.account}")
             self.stats.updateStatus(self.account, "[red]IMAP LOGIN FAILED")
             self.stats.updateThreadStatus(self.account)
+            if self.notifier:
+                self.notifier.notify(
+                    f"IMAP login failed for {self.account}",
+                    f"IMAP credentials are invalid for {self.account}. 2FA code cannot be fetched.",
+                    event_key=f"imap_failed_{self.account}")
         except Exception:
             self.log.exception(f"Error in {self.account}. The program will try to recover.")
+            if self.notifier:
+                self.notifier.notify(
+                    f"Error in {self.account}",
+                    f"Account {self.account} crashed and will try to recover.\n"
+                    f"Check the logs for details.",
+                    event_key=f"crash_{self.account}")
 
     def stop(self):
         """

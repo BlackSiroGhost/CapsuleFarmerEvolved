@@ -14,6 +14,7 @@ from time import sleep, strftime, localtime
 from Restarter import Restarter
 from SharedData import SharedData
 
+from Notifier import Notifier
 from Stats import Stats
 from VersionManager import VersionManager
 
@@ -51,6 +52,7 @@ def main(log: logging.Logger, config: Config):
 
     sharedData = SharedData()
     stats = Stats()
+    notifier = Notifier(log, config.email)
 
     for account in config.accounts:
         stats.initNewAccount(account)
@@ -70,7 +72,7 @@ def main(log: logging.Logger, config: Config):
         for account in config.accounts:
             if account not in farmThreads and restarter.canRestart(account) and stats.getThreadStatus(account):
                 log.info(f"Starting a thread for {account}.")
-                thread = FarmThread(log, config, account, stats, locks, sharedData)
+                thread = FarmThread(log, config, account, stats, locks, sharedData, notifier)
                 thread.daemon = True
                 thread.start()
                 farmThreads[account] = thread
