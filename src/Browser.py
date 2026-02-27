@@ -246,7 +246,8 @@ class Browser:
 
     def refreshSession(self):
         """
-        Refresh access and entitlement tokens
+        Refresh access and entitlement tokens.
+        Falls back to re-auth via authorize?prompt=none if refresh endpoint fails.
         """
         try:
             headers = {"Origin": "https://lolesports.com"}
@@ -254,10 +255,33 @@ class Browser:
                 "GET", "https://account.rewards.lolesports.com/v1/session/refresh", headers=headers)
             AssertCondition.statusCodeMatches(200, resAccessToken)
             self.__dumpCookies()
-        except StatusCodeAssertException as ex:
-            self.log.error("Failed to refresh session")
-            self.log.error(ex)
-            raise ex
+        except StatusCodeAssertException:
+            self.log.warning("Session refresh failed, attempting re-auth via SSO cookies...")
+            try:
+                self._reauth_via_sso()
+            except Exception as ex:
+                self.log.error(f"Re-auth also failed: {ex}")
+                raise ex
+
+    def _reauth_via_sso(self):
+        """
+        Re-authenticate using existing SSO cookies (ssid, csid, etc.)
+        by hitting the authorize endpoint with prompt=none.
+        This avoids needing to re-enter credentials or solve captcha.
+        """
+        self.client.get(
+            "https://auth.riotgames.com/authorize?client_id=esports-rna-prod"
+            "&redirect_uri=https://account.rewards.lolesports.com/v1/session/oauth-callback"
+            "&response_type=code&scope=openid&prompt=none"
+            "&state=https://lolesports.com/?memento=na.en_GB")
+        headers = {"Origin": "https://lolesports.com", self.ref: "https://lolesports.com"}
+        resToken = self._request_with_retry(
+            "GET", "https://account.rewards.lolesports.com/v1/session/token", headers=headers)
+        if resToken.status_code == 200:
+            self.log.info("Re-auth via SSO succeeded, got fresh access_token")
+            self.__dumpCookies()
+        else:
+            raise StatusCodeAssertException(200, resToken.status_code)
 
     def maintainSession(self):
         """
@@ -283,8 +307,11 @@ class Browser:
 
     def checkNewDrops(self, lastCheckTime = 0):
         try:
+            token = self.__getAccessToken()
+            if token is None:
+                return [], 0
             headers = {"Origin": "https://lolesports.com",
-                   "Authorization": "Cookie access_token"}
+                       "Authorization": f"Bearer {token}"}
             res = self._request_with_retry(
                 "GET", "https://account.service.lolesports.com/fandom-account/v1/earnedDrops?locale=en_GB&site=LOLESPORTS", headers=headers)
             resJson = self._safe_json(res, "checkNewDrops")
