@@ -66,7 +66,15 @@ class Browser:
         :return: httpx.Response
         """
         for attempt in range(max_retries + 1):
-            res = self.client.request(method, url, **kwargs)
+            try:
+                res = self.client.request(method, url, **kwargs)
+            except httpx.TimeoutException:
+                if attempt < max_retries:
+                    wait = (2 ** attempt) + random.uniform(0.5, 1.5)
+                    self.log.warning(f"Timeout on {url}. Retrying in {wait:.1f}s (attempt {attempt+1}/{max_retries})")
+                    sleep(wait)
+                    continue
+                raise
             if res.status_code == 429:
                 retry_after = int(res.headers.get("Retry-After", 5))
                 jitter = random.uniform(0.5, 2.0)
@@ -247,49 +255,27 @@ class Browser:
     def refreshSession(self):
         """
         Refresh access and entitlement tokens.
-        Falls back to re-auth via authorize?prompt=none if refresh endpoint fails.
         """
-        try:
-            headers = {"Origin": "https://lolesports.com"}
-            resAccessToken = self._request_with_retry(
-                "GET", "https://account.rewards.lolesports.com/v1/session/refresh", headers=headers)
-            AssertCondition.statusCodeMatches(200, resAccessToken)
-            self.__dumpCookies()
-        except StatusCodeAssertException:
-            self.log.warning("Session refresh failed, attempting re-auth via SSO cookies...")
-            try:
-                self._reauth_via_sso()
-            except Exception as ex:
-                self.log.error(f"Re-auth also failed: {ex}")
-                raise ex
-
-    def _reauth_via_sso(self):
-        """
-        Re-authenticate using existing SSO cookies (ssid, csid, etc.)
-        by hitting the authorize endpoint with prompt=none.
-        This avoids needing to re-enter credentials or solve captcha.
-        """
-        self.client.get(
-            "https://auth.riotgames.com/authorize?client_id=esports-rna-prod"
-            "&redirect_uri=https://account.rewards.lolesports.com/v1/session/oauth-callback"
-            "&response_type=code&scope=openid&prompt=none"
-            "&state=https://lolesports.com/?memento=na.en_GB")
-        headers = {"Origin": "https://lolesports.com", self.ref: "https://lolesports.com"}
-        resToken = self._request_with_retry(
-            "GET", "https://account.rewards.lolesports.com/v1/session/token", headers=headers)
-        if resToken.status_code == 200:
-            self.log.info("Re-auth via SSO succeeded, got fresh access_token")
-            self.__dumpCookies()
-        else:
-            raise StatusCodeAssertException(200, resToken.status_code)
+        headers = {"Origin": "https://lolesports.com"}
+        resAccessToken = self._request_with_retry(
+            "GET", "https://account.rewards.lolesports.com/v1/session/refresh", headers=headers)
+        AssertCondition.statusCodeMatches(200, resAccessToken)
+        self.log.info("Session refreshed successfully")
+        self.__dumpCookies()
 
     def maintainSession(self):
         """
-        Periodically maintain the session by refreshing the access_token
+        Periodically maintain the session by refreshing the access_token.
+        Failures are logged but don't crash the thread — heartbeats may still work.
         """
-        if self.__needSessionRefresh():
-            self.log.debug("Refreshing session.")
-            self.refreshSession()
+        try:
+            if self.__needSessionRefresh():
+                self.log.debug("Refreshing session.")
+                self.refreshSession()
+        except NoAccessTokenException:
+            self.log.warning("No access token found, skipping session refresh")
+        except Exception as ex:
+            self.log.warning(f"Session refresh failed: {ex}. Heartbeats will continue.")
 
     def sendWatchToLive(self) -> list:
         """
