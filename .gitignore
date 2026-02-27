@@ -1,12 +1,18 @@
 chromedriver
 
-# macOS 
+# macOS
 .DS_Store
 
 # Sensitive configs
+config/config.yaml
 config.dev.yaml
 *.exe
 *.log
+
+# Session cookies (contain auth tokens)
+sessions/
+src/sessions/
+*.saved
 
 # Byte-compiled  optimized  DLL files
 __pycache__

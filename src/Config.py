@@ -28,7 +28,7 @@ class Config:
                 config = yaml.safe_load(f)
                 accs = config.get("accounts")
                 for account in accs:
-                     if "username" != accs[account]["username"]:
+                     if accs[account]["username"] != "username":
                         self.accounts[account] = {
                         #Orig data
                         "username": accs[account]["username"],

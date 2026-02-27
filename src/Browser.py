@@ -7,7 +7,7 @@ from Exceptions.InvalidIMAPCredentialsException import InvalidIMAPCredentialsExc
 from Exceptions.Fail2FAException import Fail2FAException
 from Exceptions.FailFind2FAException import FailFind2FAException
 from Match import Match
-import cloudscraper
+import httpx
 from pprint import pprint
 from bs4 import BeautifulSoup
 from datetime import datetime
@@ -20,13 +20,14 @@ from pathlib import Path
 import jwt
 from IMAP import IMAP # Added to automate 2FA
 import imaplib2
+import random
 
 from SharedData import SharedData
 
 
 class Browser:
     SESSION_REFRESH_INTERVAL = 1800.0
-    STREAM_WATCH_INTERVAL = 60.0
+    STREAM_WATCH_INTERVAL = 120.0
 
     def __init__(self, log, stats, config: Config, account: str, sharedData: SharedData):
         """
@@ -36,13 +37,15 @@ class Browser:
         :param config: Config class object
         :param account: account string
         """
-        self.client = cloudscraper.create_scraper(
-            browser={
-                'browser': 'chrome',
-                'platform': 'windows',
-                'desktop': True
+        self.client = httpx.Client(
+            http2=True,
+            follow_redirects=True,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                "Accept-Language": "en-US,en;q=0.9",
             },
-            debug=False)
+            timeout=30.0,
+        )
 
         self.log = log
         self.stats = stats
@@ -51,6 +54,56 @@ class Browser:
         self.account = account
         self.sharedData = sharedData
         self.ref = "Referer"
+
+    def _request_with_retry(self, method, url, max_retries=3, **kwargs):
+        """
+        Send an HTTP request with exponential backoff retry on 429/5xx errors.
+
+        :param method: HTTP method string ("GET", "POST", "PUT")
+        :param url: request URL
+        :param max_retries: max retry attempts
+        :param kwargs: additional args passed to httpx.Client.request()
+        :return: httpx.Response
+        """
+        for attempt in range(max_retries + 1):
+            res = self.client.request(method, url, **kwargs)
+            if res.status_code == 429:
+                retry_after = int(res.headers.get("Retry-After", 5))
+                jitter = random.uniform(0.5, 2.0)
+                wait = retry_after + jitter
+                self.log.warning(f"Rate limited on {url}. Retrying in {wait:.1f}s (attempt {attempt+1}/{max_retries})")
+                if attempt < max_retries:
+                    sleep(wait)
+                    continue
+                raise RateLimitException(retry_after)
+            if res.status_code >= 500 and attempt < max_retries:
+                wait = (2 ** attempt) + random.uniform(0.5, 1.5)
+                self.log.warning(f"Server error {res.status_code} on {url}. Retrying in {wait:.1f}s")
+                sleep(wait)
+                continue
+            return res
+        return res
+
+    def _safe_json(self, res, context=""):
+        """
+        Safely parse JSON from a response, with logging on failure.
+
+        :param res: httpx.Response
+        :param context: description of what the request was for (for logging)
+        :return: parsed JSON dict/list, or None on failure
+        """
+        if res.status_code < 200 or res.status_code >= 300:
+            self.log.warning(f"{context}: unexpected status {res.status_code}")
+            return None
+        content_type = res.headers.get("content-type", "")
+        if "json" not in content_type and "javascript" not in content_type:
+            self.log.warning(f"{context}: unexpected content-type '{content_type}'")
+            return None
+        try:
+            return res.json()
+        except Exception as e:
+            self.log.error(f"{context}: failed to parse JSON - {e}")
+            return None
 
     def login(self, username: str, password: str, imapusername: str, imappassword: str, imapserver: str, refreshLock) -> bool:
         """
@@ -66,16 +119,38 @@ class Browser:
         self.__loadCookies()
         try:
             refreshLock.acquire()
-            # Submit credentials
+
+            # Step 1: Initialize auth session (POST) — must NOT include prompt=none
+            # as that skips session creation and returns interaction_required immediately
+            initData = {
+                "client_id": "esports-rna-prod",
+                "redirect_uri": "https://account.rewards.lolesports.com/v1/session/oauth-callback",
+                "response_type": "code",
+                "scope": "openid",
+            }
+            initRes = self._request_with_retry(
+                "POST", "https://auth.riotgames.com/api/v1/authorization", json=initData)
+            if initRes.status_code != 200:
+                self.log.error(f"Auth init failed with status {initRes.status_code}")
+                return False
+
+            # Step 2: Submit credentials (PUT)
             data = {"type": "auth", "username": username,
                     "password": password, "remember": True, "language": "en_US"}
-            res = self.client.put(
-                "https://auth.riotgames.com/api/v1/authorization", json=data)
+            res = self._request_with_retry(
+                "PUT", "https://auth.riotgames.com/api/v1/authorization", json=data)
             if res.status_code == 429:
-                retryAfter = res.headers['Retry-after']
+                retryAfter = res.headers.get('Retry-After', '60')
                 raise RateLimitException(retryAfter)
-            
-            resJson = res.json()
+
+            resJson = self._safe_json(res, "login PUT")
+            if resJson is None:
+                return False
+
+            if "error" in resJson:
+                self.log.error(f"Auth error: {resJson['error']}")
+                return False
+
             if "multifactor" in resJson.get("type", ""):
                 if (imapserver != ""):
                     refreshLock.release()
@@ -85,9 +160,11 @@ class Browser:
                     self.stats.updateStatus(self.account, f"[green]FETCHED 2FA CODE")
 
                     data = {"type": "multifactor", "code": req.code, "rememberDevice": True}
-                    res = self.client.put(
-                        "https://auth.riotgames.com/api/v1/authorization", json=data)
-                    resJson = res.json()
+                    res = self._request_with_retry(
+                        "PUT", "https://auth.riotgames.com/api/v1/authorization", json=data)
+                    resJson = self._safe_json(res, "login 2FA")
+                    if resJson is None:
+                        return False
                     if 'error' in resJson:
                         if resJson['error'] == 'multifactor_attempt_failed':
                             raise Fail2FAException
@@ -96,10 +173,16 @@ class Browser:
                     twoFactorCode = input(f"Enter 2FA code for {self.account}:\n")
                     self.stats.updateStatus(self.account, f"[green]CODE SENT")
                     data = {"type": "multifactor", "code": twoFactorCode, "rememberDevice": True}
-                    res = self.client.put(
-                        "https://auth.riotgames.com/api/v1/authorization", json=data)
-                    resJson = res.json()
+                    res = self._request_with_retry(
+                        "PUT", "https://auth.riotgames.com/api/v1/authorization", json=data)
+                    resJson = self._safe_json(res, "login 2FA manual")
+                    if resJson is None:
+                        return False
+
             # Finish OAuth2 login
+            if "response" not in resJson or "parameters" not in resJson.get("response", {}):
+                self.log.error(f"Auth response missing expected fields: {list(resJson.keys())}")
+                return False
             res = self.client.get(resJson["response"]["parameters"]["uri"])
         except KeyError:
             return False
@@ -114,28 +197,33 @@ class Browser:
         if token and state:
             data = {"token": token, "state": state}
             self.client.post(
-                "https://login.riotgames.com/sso/login", data=data).close()
+                "https://login.riotgames.com/sso/login", data=data)
             self.client.post(
-                "https://login.lolesports.com/sso/login", data=data).close()
+                "https://login.lolesports.com/sso/login", data=data)
             self.client.post(
-                "https://login.playvalorant.com/sso/login", data=data).close()
+                "https://login.playvalorant.com/sso/login", data=data)
             self.client.post(
-                "https://login.leagueoflegends.com/sso/callback", data=data).close()
+                "https://login.leagueoflegends.com/sso/callback", data=data)
             self.client.get(
-                "https://auth.riotgames.com/authorize?client_id=esports-rna-prod&redirect_uri=https://account.rewards.lolesports.com/v1/session/oauth-callback&response_type=code&scope=openid&prompt=none&state=https://lolesports.com/?memento=na.en_GB", allow_redirects=True).close()
-                    
-            
-            resAccessToken = self.client.get("https://account.rewards.lolesports.com/v1/session/token", headers={"Origin": "https://lolesports.com", self.ref: "https://lolesports.com"})
+                "https://auth.riotgames.com/authorize?client_id=esports-rna-prod&redirect_uri=https://account.rewards.lolesports.com/v1/session/oauth-callback&response_type=code&scope=openid&prompt=none&state=https://lolesports.com/?memento=na.en_GB")
+
+
+            resAccessToken = self._request_with_retry(
+                "GET", "https://account.rewards.lolesports.com/v1/session/token",
+                headers={"Origin": "https://lolesports.com", self.ref: "https://lolesports.com"})
 
             if resAccessToken.status_code != 200:
                 if self.ref == "Referer":
                     self.ref = "Referrer"
                 else:
                     self.ref = "Referer"
-                resAccessToken = self.client.get("https://account.rewards.lolesports.com/v1/session/token", headers={"Origin": "https://lolesports.com", self.ref: "https://lolesports.com"})
-            
-            resPasToken = self.client.get(
-                "https://account.rewards.lolesports.com/v1/session/clientconfig/rms", headers={"Origin": "https://lolesports.com", self.ref: "https://lolesports.com"}).close()
+                resAccessToken = self._request_with_retry(
+                    "GET", "https://account.rewards.lolesports.com/v1/session/token",
+                    headers={"Origin": "https://lolesports.com", self.ref: "https://lolesports.com"})
+
+            self._request_with_retry(
+                "GET", "https://account.rewards.lolesports.com/v1/session/clientconfig/rms",
+                headers={"Origin": "https://lolesports.com", self.ref: "https://lolesports.com"})
             if resAccessToken.status_code == 200:
                 self.__dumpCookies()
                 return True
@@ -162,10 +250,9 @@ class Browser:
         """
         try:
             headers = {"Origin": "https://lolesports.com"}
-            resAccessToken = self.client.get(
-                "https://account.rewards.lolesports.com/v1/session/refresh", headers=headers)
+            resAccessToken = self._request_with_retry(
+                "GET", "https://account.rewards.lolesports.com/v1/session/refresh", headers=headers)
             AssertCondition.statusCodeMatches(200, resAccessToken)
-            resAccessToken.close()
             self.__dumpCookies()
         except StatusCodeAssertException as ex:
             self.log.error("Failed to refresh session")
@@ -198,19 +285,30 @@ class Browser:
         try:
             headers = {"Origin": "https://lolesports.com",
                    "Authorization": "Cookie access_token"}
-            res = self.client.get("https://account.service.lolesports.com/fandom-account/v1/earnedDrops?locale=en_GB&site=LOLESPORTS", headers=headers)
-            resJson = res.json()
-            res.close()
+            res = self._request_with_retry(
+                "GET", "https://account.service.lolesports.com/fandom-account/v1/earnedDrops?locale=en_GB&site=LOLESPORTS", headers=headers)
+            resJson = self._safe_json(res, "checkNewDrops")
+            if resJson is None:
+                return [], 0
             return [drop for drop in resJson if lastCheckTime <= drop["unlockedDateMillis"]], len(resJson)
         except (KeyError, TypeError):
             self.log.debug("Drop check failed")
-            return []
+            return [], 0
+
+    def __getAccessToken(self) -> str:
+        """Get access_token from cookies, checking both browser and API cookie names."""
+        cookies = dict(self.client.cookies)
+        for key in ("access_token", "__Secure-access_token"):
+            if key in cookies:
+                return cookies[key]
+        return None
 
     def __needSessionRefresh(self) -> bool:
-        if "access_token" not in self.client.cookies.get_dict():
+        token = self.__getAccessToken()
+        if token is None:
             raise NoAccessTokenException()
 
-        res = jwt.decode(self.client.cookies.get_dict()["access_token"], options={"verify_signature": False})
+        res = jwt.decode(token, options={"verify_signature": False})
         timeLeft = res['exp'] - int(time())
         self.log.debug(f"{timeLeft}s until session expires.")
         if timeLeft < 600:
@@ -230,10 +328,9 @@ class Browser:
                 "geolocation": {"code": "CZ", "area": "EU"},
                 "tournament_id": match.tournamentId}
         headers = {"Origin": "https://lolesports.com"}
-        res = self.client.post(
-            "https://rex.rewards.lolesports.com/v1/events/watch", json=data, headers=headers)
+        res = self._request_with_retry(
+            "POST", "https://rex.rewards.lolesports.com/v1/events/watch", json=data, headers=headers)
         AssertCondition.statusCodeMatches(201, res)
-        res.close()
 
     def __getLoginTokens(self, form: str) -> tuple[str, str]:
         """
@@ -251,13 +348,59 @@ class Browser:
             state = tokenInput.get("value", "")
         return token, state
 
+    def hasValidSavedSession(self) -> bool:
+        """
+        Check if a saved session exists with an access_token that isn't expired.
+        Used to skip browser login when cookies were obtained via browser_login.py.
+        """
+        if not self.__loadCookies():
+            return False
+        token = self.__getAccessToken()
+        if token is None:
+            return False
+        try:
+            res = jwt.decode(token, options={"verify_signature": False})
+            timeLeft = res['exp'] - int(time())
+            if timeLeft > 0:
+                self.log.info(f"Loaded saved session for {self.account} ({timeLeft}s until expiry)")
+                return True
+            else:
+                self.log.info(f"Saved session for {self.account} is expired, attempting refresh...")
+                try:
+                    self.refreshSession()
+                    return True
+                except Exception:
+                    self.log.warning(f"Session refresh failed for {self.account}")
+                    return False
+        except Exception:
+            return False
+
     def __dumpCookies(self):
         with open(f'./sessions/{self.account}.saved', 'wb') as f:
-            pickle.dump(self.client.cookies, f)
+            pickle.dump(dict(self.client.cookies), f)
 
     def __loadCookies(self):
         if Path(f'./sessions/{self.account}.saved').exists():
-            with open(f'./sessions/{self.account}.saved', 'rb') as f:
-                self.client.cookies.update(pickle.load(f))
-                return True
+            try:
+                with open(f'./sessions/{self.account}.saved', 'rb') as f:
+                    cookies = pickle.load(f)
+                    if isinstance(cookies, dict):
+                        # Browser cookies use __Secure- prefix; add unprefixed aliases
+                        # so the server-side "Cookie access_token" auth header works
+                        for key in list(cookies.keys()):
+                            if key.startswith("__Secure-"):
+                                alias = key[len("__Secure-"):]
+                                if alias not in cookies:
+                                    cookies[alias] = cookies[key]
+                        self.client.cookies.update(cookies)
+                    else:
+                        # Old format (CookieJar from cloudscraper) — discard
+                        self.log.debug("Discarding old cookie format, will re-login")
+                        Path(f'./sessions/{self.account}.saved').unlink()
+                        return False
+                    return True
+            except Exception:
+                self.log.debug("Failed to load saved session, will re-login")
+                Path(f'./sessions/{self.account}.saved').unlink(missing_ok=True)
+                return False
         return False

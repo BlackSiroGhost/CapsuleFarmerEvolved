@@ -37,9 +37,16 @@ class FarmThread(Thread):
         Start watching every live match
         """
         try:
-            self.stats.updateStatus(self.account, "[yellow]LOGIN")
+            # Try saved session first (from browser_login.py), fall back to API login
+            loggedIn = False
+            if self.browser.hasValidSavedSession():
+                self.stats.updateStatus(self.account, "[green]SESSION RESTORED")
+                loggedIn = True
+            else:
+                self.stats.updateStatus(self.account, "[yellow]LOGIN")
+                loggedIn = self.browser.login(self.config.getAccount(self.account)["username"], self.config.getAccount(self.account)["password"], self.config.getAccount(self.account)["imapUsername"], self.config.getAccount(self.account)["imapPassword"], self.config.getAccount(self.account)["imapServer"], self.locks["refreshLock"])
 
-            if self.browser.login(self.config.getAccount(self.account)["username"], self.config.getAccount(self.account)["password"], self.config.getAccount(self.account)["imapUsername"], self.config.getAccount(self.account)["imapPassword"], self.config.getAccount(self.account)["imapServer"], self.locks["refreshLock"]):
+            if loggedIn:
                 self.stats.resetLoginFailed(self.account)
                 self.stats.updateStatus(self.account, "[green]LIVE")
                 _, totalDrops = self.browser.checkNewDrops(0)
@@ -127,8 +134,13 @@ def getLeagueFromID(leagueId):
 def getLeagues():
     headers = {"Origin": "https://lolesports.com", "Referrer": "https://lolesports.com",
                "x-api-key": Config.RIOT_API_KEY}
-    res = requests.get(
-        "https://esports-api.lolesports.com/persisted/gw/getLeagues?hl=en-GB", headers=headers)
-    leagues = res.json()["data"].get("leagues", [])
-    res.close()
-    return leagues
+    try:
+        res = requests.get(
+            "https://esports-api.lolesports.com/persisted/gw/getLeagues?hl=en-GB", headers=headers)
+        if res.status_code != 200:
+            return []
+        resJson = res.json()
+        res.close()
+        return resJson.get("data", {}).get("leagues", [])
+    except Exception:
+        return []

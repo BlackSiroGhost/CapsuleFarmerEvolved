@@ -1,7 +1,7 @@
 from datetime import datetime, timezone, timedelta
 from threading import Thread
 from time import sleep
-import cloudscraper
+import httpx
 
 from AssertCondition import AssertCondition
 from Config import Config
@@ -22,13 +22,14 @@ class DataProviderThread(Thread):
         self.log = log
         self.sharedData = sharedData
         self.config = config
-        self.client = cloudscraper.create_scraper(
-            browser={
-                'browser': 'chrome',
-                'platform': 'windows',
-                'desktop': True
+        self.client = httpx.Client(
+            http2=True,
+            follow_redirects=True,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
             },
-            debug=False)
+            timeout=30.0,
+        )
         self.currentTime = None
         self.startTime = None
 
@@ -38,8 +39,19 @@ class DataProviderThread(Thread):
                 self.fetchLiveMatches()
                 self.fetchTimeUntilNextMatch()
                 sleep(DataProviderThread.DEFAULT_SLEEP_DURATION)
-            except:
-                self.log.error("RIP")
+            except Exception as ex:
+                self.log.error(f"DataProviderThread error: {ex}")
+                sleep(DataProviderThread.DEFAULT_SLEEP_DURATION)
+
+    def _safe_json(self, res, context=""):
+        if res.status_code < 200 or res.status_code >= 300:
+            self.log.warning(f"{context}: unexpected status {res.status_code}")
+            return None
+        try:
+            return res.json()
+        except Exception as e:
+            self.log.error(f"{context}: failed to parse JSON - {e}")
+            return None
 
     def fetchLiveMatches(self):
         """
@@ -50,8 +62,10 @@ class DataProviderThread(Thread):
         res = self.client.get(
             "https://esports-api.lolesports.com/persisted/gw/getLive?hl=en-GB", headers=headers)
         AssertCondition.statusCodeMatches(200, res)
-        resJson = res.json()
-        res.close()
+        resJson = self._safe_json(res, "fetchLiveMatches")
+        if resJson is None:
+            self.sharedData.setLiveMatches()
+            return
         liveMatches = {}
         try:
             events = resJson["data"]["schedule"].get("events", [])
@@ -84,8 +98,10 @@ class DataProviderThread(Thread):
             res = self.client.get(
                 "https://esports-api.lolesports.com/persisted/gw/getSchedule?hl=en-GB", headers=headers)
             AssertCondition.statusCodeMatches(200, res)
-            resJson = res.json()
-            res.close()
+            resJson = self._safe_json(res, "fetchTimeUntilNextMatch")
+            if resJson is None:
+                self.sharedData.setTimeUntilNextMatch("None")
+                return
             events = resJson["data"]["schedule"]["events"]
             for event in events:
                 if event["state"] == "unstarted":
@@ -147,4 +163,3 @@ class DataProviderThread(Thread):
         systemTimeStr = datetime.now().strftime(datetimeFormat)
         systemTimeDT = datetime.strptime(systemTimeStr, datetimeFormat)
         return systemTimeDT
-        

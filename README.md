@@ -1,67 +1,265 @@
-![# Capsule Farmer Evolved](https://raw.githubusercontent.com/LeagueOfPoro/CapsuleFarmerEvolved/master/.github/banner.png)
-<!-- Font for banner above by Riot Games BeaufortForLoL https://brand.riotgames.com/en-us/league-of-legends/typography/ -->
-<p align="center">
-<a href="https://github.com/LeagueOfPoro/CapsuleFarmerEvolved/blob/master/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-CC%20BY--NC--SA%204.0-orange"></a>
-<a href="https://www.python.org/downloads/release/python-3100/"><img alt="Python3" src="https://img.shields.io/badge/built%20for-Python%E2%89%A53.10-red.svg?style=flat"></a>
-<a href="https://github.com/LeagueOfPoro/CapsuleFarmerEvolved/pulls"><img alt="PRsWelcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat"></a>
-<a href="https://github.com/LeagueOfPoro/CapsuleFarmerEvolved/stargazers"><img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/LeagueOfPoro/CapsuleFarmerEvolved"></a>
-<a href="https://github.com/LeagueOfPoro/CapsuleFarmerEvolved/issues?q=is%3Aissue+is%3Aclosed"><img alt="GitHub closed issues" src="https://img.shields.io/github/issues-closed/LeagueOfPoro/CapsuleFarmerEvolved"></a>
-<a href="https://github.com/LeagueOfPoro/CapsuleFarmerEvolved"><img alt="GitHub last commit" src="https://img.shields.io/github/last-commit/LeagueOfPoro/CapsuleFarmerEvolved"></a>
-</p>
+# Capsule Farmer Evolved
 
-Are you tired of watching professional League of Legends games? Do you watch only for the drops? This is a revolution in the farming of League of Legends Esports capsules!
+Farm LoL Esports capsule drops by simulating watch events on lolesports.com. No browser required at runtime -- the bot sends lightweight API heartbeats to trick the server into thinking you're watching.
 
-This is a successor to the old [EsportsCapsuleFarmer](https://github.com/LeagueOfPoro/EsportsCapsuleFarmer) which relied on a web browser to watch videos. *Capsule Farmer Evolved* simulates traffic to lolesports.com servers and tricks it into thinking the account is watching a stream. This approach drastically lowers the hardware requirements.
+> **Fork note:** This is a maintained fork of [LeagueOfPoro/CapsuleFarmerEvolved](https://github.com/LeagueOfPoro/CapsuleFarmerEvolved) which stopped working in 2023. Key fixes: replaced `cloudscraper` with `httpx` (HTTP/2), fixed the broken Riot OAuth2 auth flow, added browser-cookie authentication to bypass hCaptcha, and added retry logic with exponential backoff.
 
-# ⚠️⚠️⚠️ 15/3/23: RIOT TOOK ACTION AGAINST CAPSULE FARMER EVOLVED! IT STILL WORKS BUT YOUR ACCOUNT MIGHT GET SHADOWBANNED.
-![Screenshot 2023-03-14 220953](https://user-images.githubusercontent.com/95635582/225154524-427c863c-c374-48fd-a097-6a00143194fb.png)
+## How It Works
 
-Use this tool at your OWN risk. Watch this video for details: https://www.youtube.com/watch?v=DeKE3a8EV5c
+The bot authenticates with your Riot account session cookies, then sends periodic "watch" heartbeats to Riot's rewards API. Riot thinks you're watching live LoL Esports streams and awards drops accordingly.
 
-[More information about Drops From Riot Games.](https://lolesports.com/article/drops-information-for-lol-esports-season-2023/blt15759d60486d16cc)
+**Important:** Riot added hCaptcha to their login page, so the bot can no longer log in via API alone. You must log into [lolesports.com](https://lolesports.com) in a browser first, then extract your session cookies for the bot to use.
 
+## Requirements
 
-# README CONTENTS 
-1. [Features](#features) 
-2. [Community](#community)
-3. [Notes](#notes)
-4. [Configuration](https://github.com/LeagueOfPoro/CapsuleFarmerEvolved/wiki/Configuration)
-5. [Installation](https://github.com/LeagueOfPoro/CapsuleFarmerEvolved/wiki)
-    - [Windows](https://github.com/LeagueOfPoro/CapsuleFarmerEvolved/wiki/Advanced-Installation-for-Windows)
-    - [Linux](https://github.com/LeagueOfPoro/CapsuleFarmerEvolved/wiki/Advanced-Installation-for-Linux)
-    - [Docker](https://github.com/LeagueOfPoro/CapsuleFarmerEvolved/wiki/Advanced-Installation-for-Docker)
-    - [MacOS](https://github.com/LeagueOfPoro/CapsuleFarmerEvolved/wiki/Advanced-Installation-for-MacOS)
-    - [Android](https://github.com/LeagueOfPoro/CapsuleFarmerEvolved/wiki/Advanced-Installation-for-Android)
-    - [Google TV](https://github.com/LeagueOfPoro/CapsuleFarmerEvolved/wiki/Advanced-Installation-for-Google-TV)
-6. [Disclaimer⚠️](#disclaimer)
+- Python 3.10+
+- [pipenv](https://pipenv.pypa.io/) (recommended) or pip + venv
+- A browser (Firefox, LibreWolf, or Chrome) where you're logged into lolesports.com
 
-## Features
-- Watch all live matches on lolesports.com
-- Show how many drops each account received during the program run
-- Very lightweight - no external browser needed
-- Simple GUI
-- 2FA (experimental) - programs prompts for the code on startup
-- Docker supported
-- ARM supported (Raspberry Pi)
-- [Discord Webhook support](https://github.com/LeagueOfPoro/CapsuleFarmerEvolved/wiki/Configuration#configuration-options)
+---
 
-## Community
-If you have any type of issue, need help, or just want to hangout. Come to [League of Poro's Discord server](https://discord.gg/ebm5MJNvHU).
+## Installation
 
-## Support my work
-[Subscribe to my channel on YouTube](https://www.youtube.com/channel/UCwgpdTScSd788qILhLnyyyw?sub_confirmation=1) or even
+### Windows
 
-<a href='https://www.youtube.com/channel/UCwgpdTScSd788qILhLnyyyw/join' target='_blank'><img height='35' style='border:0px;height:46px;' src='https://share.leagueofporo.com/yt_member.png' border='0' alt='Become a channel member on YouTube' />
+```bash
+git clone https://github.com/BlackSiroGhost/CapsuleFarmerEvolved.git
+cd CapsuleFarmerEvolved
+pip install pipenv
+pipenv install
+```
 
-## Notes
-- I recommend disabling 2FA on accounts using the bot. It will be way more stable, and it won't ask you for a code in the middle of a random night.
-- Not every account receives every drop. That is normal, and it would happen even if you watched it on the web.
-![image](https://user-images.githubusercontent.com/95635582/215994461-4f613b76-0e96-4b1a-b138-f1caa748df65.png)
-- Regularly check if the "Heartbeat" happened within the last few minutes. If not, restart the program.
+### Linux (Debian/Ubuntu)
 
-## Disclaimer 
-CapsuleFarmerEvolved is not endorsed by Riot Games and does not reflect the views or opinions of Riot Games or anyone officially involved in producing or managing Riot Games properties. Riot Games and all associated properties are trademarks or registered trademarks of Riot Games, Inc
+```bash
+git clone https://github.com/BlackSiroGhost/CapsuleFarmerEvolved.git
+cd CapsuleFarmerEvolved
 
-This project comes with no guarantee or warranty. You are responsible for whatever happens from using this project. No bans have been reported from using this project but it is not a guarantee. This is a personal project and is in no way affiliated with Riot Games.
-<!-- Properly citing disclaimer from Riot Games Developer Portal https://developer.riotgames.com/docs/lol -->
+# Option A: pipenv
+pip install pipenv
+pipenv install
 
+# Option B: venv (better for servers)
+python3 -m venv venv
+source venv/bin/activate
+pip install httpx[http2] requests beautifulsoup4 pyyaml rich pyjwt imaplib2
+```
+
+---
+
+## Configuration
+
+Copy the example config and add your Riot account:
+
+```bash
+cp config/config.yaml.example config/config.yaml
+```
+
+Edit `config/config.yaml`:
+
+```yaml
+accounts:
+  MyAccount:
+    username: "YourRiotUsername"
+    password: "YourRiotPassword"
+
+# Optional
+# debug: true
+# connectorDropsUrl: "https://discord.com/api/webhooks/..."
+```
+
+You can add multiple accounts:
+
+```yaml
+accounts:
+  Account1:
+    username: "user1"
+    password: "pass1"
+  Account2:
+    username: "user2"
+    password: "pass2"
+```
+
+### Optional: 2FA via IMAP
+
+If your account has 2FA enabled, the bot can automatically fetch the code via IMAP:
+
+```yaml
+accounts:
+  MyAccount:
+    username: "YourRiotUsername"
+    password: "YourRiotPassword"
+    imapUsername: "your@email.com"
+    imapPassword: "email-password"
+    imapServer: "imap.gmail.com"
+```
+
+---
+
+## Authentication
+
+Since Riot now requires hCaptcha on login, the bot uses **browser session cookies** instead of API login. You have two options:
+
+### Option A: Extract Cookies from LibreWolf/Firefox (Recommended)
+
+1. Open LibreWolf or Firefox
+2. Go to [https://lolesports.com](https://lolesports.com) and log in with your Riot account
+3. **Close the browser** (it locks the cookie database)
+4. Run the extraction script:
+
+```bash
+# From the project root
+pipenv run python src/extract_browser_cookies.py -c config/config.yaml
+```
+
+The script reads your browser's `cookies.sqlite` and saves session cookies for each configured account.
+
+**Custom browser profile path:**
+
+```bash
+pipenv run python src/extract_browser_cookies.py -c config/config.yaml --db "C:\path\to\cookies.sqlite"
+```
+
+Default path (LibreWolf on Windows):
+```
+%APPDATA%\librewolf\Profiles\<profile-name>\cookies.sqlite
+```
+
+For Firefox:
+```
+%APPDATA%\Mozilla\Firefox\Profiles\<profile-name>\cookies.sqlite
+```
+
+### Option B: Playwright Browser Login
+
+If you prefer an automated browser flow:
+
+```bash
+pipenv run python src/browser_login.py -c config/config.yaml
+```
+
+This opens a Chromium window where you log in manually (solving hCaptcha yourself). Once logged in, the script saves the cookies automatically.
+
+> **Note:** Cookies expire periodically. When the bot starts failing with `auth_failure` or `401` errors, re-run the cookie extraction.
+
+---
+
+## Usage
+
+### Run locally
+
+```bash
+cd CapsuleFarmerEvolved
+pipenv run python src/main.py -c config/config.yaml
+```
+
+Or with venv:
+
+```bash
+source venv/bin/activate
+cd src
+python main.py -c ../config/config.yaml
+```
+
+The bot will show a live TUI with the status of each account:
+
+- **SESSION RESTORED** -- loaded saved cookies successfully
+- **LIVE** -- watching matches and sending heartbeats
+- **LOGIN FAILED** -- cookies expired, re-extract them
+
+### Run on a headless server
+
+The typical workflow is: authenticate on your local machine (where you have a browser), then deploy cookies to the server.
+
+#### 1. Set up the server
+
+```bash
+ssh root@your-server
+
+# Clone and install
+git clone https://github.com/BlackSiroGhost/CapsuleFarmerEvolved.git /home/capsulefarmer
+cd /home/capsulefarmer
+python3 -m venv venv
+source venv/bin/activate
+pip install httpx[http2] requests beautifulsoup4 pyyaml rich pyjwt imaplib2
+
+# Create config
+cp config/config.yaml.example config/config.yaml
+nano config/config.yaml  # Add your account(s)
+
+# Create sessions directory
+mkdir -p src/sessions
+```
+
+#### 2. Extract cookies locally and upload
+
+On your local machine (where you have a browser):
+
+```bash
+# Extract cookies
+pipenv run python src/extract_browser_cookies.py -c config/config.yaml
+
+# Upload to server
+scp src/sessions/YourAccount.saved root@your-server:/home/capsulefarmer/src/sessions/
+```
+
+#### 3. Start the bot in a screen session
+
+```bash
+ssh root@your-server
+cd /home/capsulefarmer/src
+screen -dmS capsule-farmer bash -c "source ../venv/bin/activate && python3 main.py -c ../config/config.yaml"
+```
+
+#### 4. Check status
+
+```bash
+# Attach to the screen session (Ctrl+A, D to detach)
+screen -r capsule-farmer
+
+# Or just check the log
+tail -f /home/capsulefarmer/src/logs/capsulefarmer.log
+```
+
+#### 5. Refresh cookies when they expire
+
+When the log shows `auth_failure` errors:
+
+1. Log into lolesports.com in your local browser
+2. Close the browser
+3. Re-extract and upload:
+
+```bash
+# Local machine
+pipenv run python src/extract_browser_cookies.py -c config/config.yaml
+scp src/sessions/YourAccount.saved root@your-server:/home/capsulefarmer/src/sessions/
+
+# Restart on server
+ssh root@your-server "screen -S capsule-farmer -X quit; sleep 1; cd /home/capsulefarmer/src && screen -dmS capsule-farmer bash -c 'source ../venv/bin/activate && python3 main.py -c ../config/config.yaml'"
+```
+
+---
+
+## Changes from Upstream
+
+| Change | Details |
+|---|---|
+| Replaced `cloudscraper` with `httpx` | `cloudscraper` is abandoned and can't bypass modern Cloudflare. `httpx` with HTTP/2 works. |
+| Fixed Riot OAuth2 auth flow | Added the required POST init step before PUT credentials. |
+| Browser cookie authentication | Bypasses hCaptcha by using cookies from a real browser session. |
+| Retry with exponential backoff | All API calls retry on 429 (rate limit) and 5xx errors with jitter. |
+| Safe JSON parsing | All `.json()` calls are wrapped with status/content-type checks to prevent crashes. |
+| Fixed Config.py comparison bug | `"username" != value` was always true; fixed to `value != "username"`. |
+| Watch interval increased | 60s to 120s to reduce rate limiting. |
+
+---
+
+## Disclaimer
+
+This tool is **not endorsed by Riot Games** and does not reflect the views or opinions of Riot Games or anyone officially involved in producing or managing Riot Games properties. Riot Games and all associated properties are trademarks or registered trademarks of Riot Games, Inc.
+
+**Use at your own risk.** No bans have been reported but there is no guarantee. Riot has previously shadow-banned accounts using similar tools.
+
+## License
+
+[CC BY-NC-SA 4.0](LICENSE) (inherited from upstream)

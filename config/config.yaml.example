@@ -1,0 +1,17 @@
+accounts:
+  MyAccount:
+    username: "YourRiotUsername"
+    password: "YourRiotPassword"
+    # Optional: IMAP for automatic 2FA code fetching
+    # imapUsername: "your@email.com"
+    # imapPassword: "email-password"
+    # imapServer: "imap.gmail.com"
+
+# Optional: enable debug logging
+# debug: true
+
+# Optional: Discord webhook for drop notifications
+# connectorDropsUrl: "https://discord.com/api/webhooks/..."
+
+# Optional: show historical drops on startup
+# showHistoricalDrops: true
