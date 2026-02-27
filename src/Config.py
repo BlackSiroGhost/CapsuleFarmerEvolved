@@ -50,6 +50,7 @@ class Config:
                     "smtpUser": config.get("smtpUser", ""),
                     "smtpPassword": config.get("smtpPassword", ""),
                     "notifyEmail": config.get("notifyEmail", ""),
+                    "ntfyTopic": config.get("ntfyTopic", ""),
                 }
         except FileNotFoundError as ex:
             print(f"[red]CRITICAL ERROR: The configuration file cannot be found at {configPath}\nHave you extacted the ZIP archive and edited the configuration file?")

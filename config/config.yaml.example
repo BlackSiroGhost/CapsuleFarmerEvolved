@@ -16,6 +16,10 @@ accounts:
 # Optional: show historical drops on startup
 # showHistoricalDrops: true
 
+# Optional: Push notifications via ntfy.sh (recommended, works everywhere)
+# Pick a unique topic name and subscribe in the ntfy app or at https://ntfy.sh/<topic>
+# ntfyTopic: "capsulefarmer-myname"
+
 # Optional: Email notifications on login failure, crashes, etc.
 # Requires a Gmail App Password: https://myaccount.google.com/apppasswords
 # smtpServer: "smtp.gmail.com"
